@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: MadMix Insights Dashboard",
+  "description": "An interactive analytics and plain-English business decision dashboard for MadMix millet-based snacks, integrating platform distribution and customer survey data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
