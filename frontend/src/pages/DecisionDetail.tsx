@@ -17,6 +17,7 @@ import RawDataTable from '../components/decisions/RawDataTable';
 
 interface DecisionDetailProps {
   decisionId: string;
+  cachedDecision: Decision | null;
   onBack: () => void;
   isBookmarked: boolean;
   onToggleBookmark: (id: string) => void;
@@ -26,20 +27,26 @@ interface DecisionDetailProps {
   onToggleCompleted?: (id: string) => void;
 }
 
-export default function DecisionDetail({ 
-  decisionId, 
-  onBack, 
-  isBookmarked, 
+export default function DecisionDetail({
+  decisionId,
+  cachedDecision,
+  onBack,
+  isBookmarked,
   onToggleBookmark,
   onShare,
   onNavigateToExplore,
   isCompleted = false,
   onToggleCompleted
 }: DecisionDetailProps) {
-  const [decision, setDecision] = useState<Decision | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [decision, setDecision] = useState<Decision | null>(cachedDecision);
+  const [isLoading, setIsLoading] = useState(!cachedDecision);
 
   useEffect(() => {
+    if (cachedDecision) {
+      setDecision(cachedDecision);
+      setIsLoading(false);
+      return;
+    }
     async function loadDecision() {
       setIsLoading(true);
       const data = await getDecisionById(decisionId);
@@ -47,7 +54,7 @@ export default function DecisionDetail({
       setIsLoading(false);
     }
     loadDecision();
-  }, [decisionId]);
+  }, [decisionId, cachedDecision]);
 
   if (isLoading) {
     return (

@@ -22,8 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 COMMERCE_FILE = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'assets', '.aistudio',
-    'MadMix Quick Com Data.xlsx'
+    os.path.dirname(__file__), '..', '..', 'assets', 'PODs-Data.xlsx'
 )
 SURVEY_FILE = os.path.join(
     os.path.dirname(__file__), '..', '..', 'assets',
@@ -169,7 +168,10 @@ def parse_pods_sales() -> list[dict]:
             month = 'Unknown'
         col_groups.append((i, i + 1, str(platform_raw).strip(), month))
 
-    rows = []
+    # Use a dict to aggregate: multiple raw city names can normalize to the same
+    # canonical city (e.g. "Ahmedabad-Gandhinagar" + "ADALAJ" → "Ahmedabad").
+    # Summing their MRP prevents ON CONFLICT duplicates within a single batch.
+    agg: dict[tuple, float] = {}
     for city_col, val_col, platform, month in col_groups:
         for idx in range(3, len(df)):  # data starts at row 3
             city_raw = df.iloc[idx, city_col]
@@ -177,13 +179,13 @@ def parse_pods_sales() -> list[dict]:
             if pd.isna(city_raw) or pd.isna(val):
                 continue
             city = normalize_city(str(city_raw))
-            rows.append({
-                'city': city,
-                'platform': platform,
-                'month': month,
-                'sales_mrp': float(val),
-            })
+            key = (city, platform, month)
+            agg[key] = agg.get(key, 0.0) + float(val)
 
+    rows = [
+        {'city': c, 'platform': p, 'month': m, 'sales_mrp': v}
+        for (c, p, m), v in agg.items()
+    ]
     print(f'  pods_sales: {len(rows)} rows parsed')
     return rows
 
@@ -208,7 +210,8 @@ def parse_sku_sales() -> list[dict]:
     """
     df = pd.read_excel(COMMERCE_FILE, sheet_name='SKU Level Sales', header=None)
 
-    rows = []
+    # Aggregate into (sku, line, city, platform) → mrp to merge any city name variants
+    agg: dict[tuple, dict] = {}
 
     # ---- Big Basket ----
     current_bb_sku = None
@@ -232,14 +235,18 @@ def parse_sku_sales() -> list[dict]:
                 mrp = float(mrp_raw)
             except (TypeError, ValueError):
                 continue
-            rows.append({
-                'sku': current_bb_sku,
-                'sku_raw': str(sku_raw) if not pd.isna(sku_raw) else None,
-                'line': current_bb_line,
-                'city': city,
-                'platform': 'Big Basket',
-                'sales_mrp': mrp,
-            })
+            key = (current_bb_sku, current_bb_line, city, 'Big Basket')
+            if key in agg:
+                agg[key]['sales_mrp'] += mrp
+            else:
+                agg[key] = {
+                    'sku': current_bb_sku,
+                    'sku_raw': str(sku_raw) if not pd.isna(sku_raw) else None,
+                    'line': current_bb_line,
+                    'city': city,
+                    'platform': 'Big Basket',
+                    'sales_mrp': mrp,
+                }
 
     # ---- Instamart ----
     current_im_sku = None
@@ -265,15 +272,20 @@ def parse_sku_sales() -> list[dict]:
                 mrp = float(col4)
             except (TypeError, ValueError):
                 continue
-            rows.append({
-                'sku': current_im_sku,
-                'sku_raw': None,
-                'line': current_im_line,
-                'city': city,
-                'platform': 'Instamart',
-                'sales_mrp': mrp,
-            })
+            key = (current_im_sku, current_im_line, city, 'Instamart')
+            if key in agg:
+                agg[key]['sales_mrp'] += mrp
+            else:
+                agg[key] = {
+                    'sku': current_im_sku,
+                    'sku_raw': None,
+                    'line': current_im_line,
+                    'city': city,
+                    'platform': 'Instamart',
+                    'sales_mrp': mrp,
+                }
 
+    rows = list(agg.values())
     print(f'  sku_sales: {len(rows)} rows parsed')
     return rows
 

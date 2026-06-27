@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.routers import analysis, decisions, import_data
@@ -17,6 +20,15 @@ app.add_middleware(
     allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'],
     allow_headers=['Authorization', 'Content-Type'],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={'detail': str(exc)},
+    )
 
 app.include_router(analysis.router, prefix='/api/v1', tags=['analysis'])
 app.include_router(decisions.router, prefix='/api/v1', tags=['decisions'])

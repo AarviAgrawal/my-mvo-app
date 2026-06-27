@@ -93,12 +93,18 @@ export default function AppShell({
         {/* User Card & Logout inside sidebar */}
         <div className="p-4 border-t border-brand-white/10 flex flex-col gap-3 bg-brand-purple/95">
           <div className="flex items-center gap-3 bg-brand-white/10 p-3 rounded-2xl border border-brand-white/10">
-            <img 
-              src={userProfile.avatar} 
-              alt={userProfile.name} 
-              referrerPolicy="no-referrer"
-              className="w-9 h-9 rounded-2xl border-2 border-brand-lavender object-cover shadow-sm"
-            />
+            {userProfile.avatar ? (
+              <img
+                src={userProfile.avatar}
+                alt={userProfile.name}
+                referrerPolicy="no-referrer"
+                className="w-9 h-9 rounded-2xl border-2 border-brand-lavender object-cover shadow-sm"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-2xl border-2 border-brand-lavender bg-brand-lavender/30 flex items-center justify-center shadow-sm shrink-0">
+                <span className="font-fredoka font-bold text-sm text-white uppercase">{userProfile.name?.[0] ?? '?'}</span>
+              </div>
+            )}
             <div className="min-w-0">
               <p className="font-display font-extrabold text-xs uppercase tracking-wider truncate text-white">{userProfile.name}</p>
               <p className="font-mono text-[10px] text-brand-lavender-tint/80 truncate">{userProfile.email}</p>
@@ -139,13 +145,22 @@ export default function AppShell({
               </span>
             </button>
           )}
-          <img 
-            src={userProfile.avatar} 
-            alt={userProfile.name} 
-            referrerPolicy="no-referrer"
-            onClick={() => setActiveTab('profile')}
-            className="w-8 h-8 rounded-full border-2 border-brand-lavender object-cover cursor-pointer shadow-sm"
-          />
+          {userProfile.avatar ? (
+            <img
+              src={userProfile.avatar}
+              alt={userProfile.name}
+              referrerPolicy="no-referrer"
+              onClick={() => setActiveTab('profile')}
+              className="w-8 h-8 rounded-full border-2 border-brand-lavender object-cover cursor-pointer shadow-sm"
+            />
+          ) : (
+            <div
+              onClick={() => setActiveTab('profile')}
+              className="w-8 h-8 rounded-full border-2 border-brand-lavender bg-brand-lavender/30 flex items-center justify-center cursor-pointer shadow-sm shrink-0"
+            >
+              <span className="font-fredoka font-bold text-sm text-white uppercase">{userProfile.name?.[0] ?? '?'}</span>
+            </div>
+          )}
         </div>
       </header>
 

@@ -62,6 +62,12 @@ class AnalysisResponse(BaseModel):
     platformGap: PlatformGapSummary
     pincodeAvailabilityRate: float  # 0.0–1.0
 
+    # Derived survey intelligence
+    ageGroupBreakdown: list[FreqItem]         # demographic distribution of respondents
+    highFrequencyBuyerPct: float              # 0.0–1.0: fraction buying Daily or Few times a week
+    unmetDemandScore: float                   # 0.0–1.0: composite skip_rate×0.5 + gap_pct×0.5
+    estimatedMissedRevenueMultiple: float     # gap_pct / listed_pct (capped 5.0); multiply by revenue for opportunity
+
 
 class HotCityItem(BaseModel):
     city: str

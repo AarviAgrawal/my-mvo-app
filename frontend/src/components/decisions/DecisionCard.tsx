@@ -248,12 +248,12 @@ export default function DecisionCard({
 
       {/* AUTOMATIC EVIDENCE */}
       <div className="border-t border-brand-lavender/25 bg-brand-lavender-tint/10 p-5 md:p-6">
-        <EvidencePanel evidence={decision.evidence} />
+        <EvidencePanel evidence={decision.evidence ?? []} />
       </div>
 
       {/* AUTOMATIC RAW DATA */}
       <div className="border-t border-brand-lavender/25 bg-brand-lavender-tint/10 p-5 md:p-6 overflow-hidden">
-        <RawDataTable rawDataRefs={decision.rawDataRefs} />
+        <RawDataTable rawDataRefs={decision.rawDataRefs ?? []} />
       </div>
     </div>
   );

@@ -44,7 +44,7 @@ def aggregate_analysis(
     # ----------------------------------------------------------------
     # 1. pods_sales — city-level MRP aggregation
     # ----------------------------------------------------------------
-    pods_q = db.table('pods_sales').select('city, platform, month, sales_mrp')
+    pods_q = db.table('pods_sales').select('city, platform, month, sales_mrp').neq('city', 'Grand Total')
     if platform:
         pods_q = pods_q.eq('platform', platform)
     if city_filter:
@@ -59,26 +59,28 @@ def aggregate_analysis(
         platform_sums[r['platform']] += r['sales_mrp']
     sales_by_platform = [PlatformValue(name=k, value=v) for k, v in sorted(platform_sums.items())]
 
-    # podsSalesDelta: per city+platform, compare Apr vs May
-    delta_map: dict[tuple, dict] = {}
+    # podsSalesDelta: aggregate to PLATFORM level (Apr vs May totals).
+    # City-level is too granular (385 rows, mostly May=0 for cities not in May data).
+    plat_delta_map: dict[str, dict] = {}
     for r in pods_rows:
-        key = (r['city'], r['platform'])
-        if key not in delta_map:
-            delta_map[key] = {'apr': 0.0, 'may': 0.0}
+        p = r['platform']
+        if p not in plat_delta_map:
+            plat_delta_map[p] = {'apr': 0.0, 'may': 0.0}
         if 'Apr' in r['month']:
-            delta_map[key]['apr'] += r['sales_mrp']
+            plat_delta_map[p]['apr'] += r['sales_mrp']
         elif 'May' in r['month']:
-            delta_map[key]['may'] += r['sales_mrp']
+            plat_delta_map[p]['may'] += r['sales_mrp']
 
     pods_delta: list[PodsDeltaItem] = []
-    for (c, p), v in delta_map.items():
+    for p, v in plat_delta_map.items():
         apr_mrp = v['apr']
         may_mrp = v['may']
         delta_pct = ((may_mrp - apr_mrp) / apr_mrp) if apr_mrp > 0 else 0.0
         pods_delta.append(PodsDeltaItem(
-            city=c, platform=p, aprMrp=apr_mrp, mayMrp=may_mrp, deltaPct=round(delta_pct, 4)
+            city='ALL', platform=p, aprMrp=round(apr_mrp, 2), mayMrp=round(may_mrp, 2),
+            deltaPct=round(delta_pct, 4)
         ))
-    pods_delta.sort(key=lambda x: x.deltaPct)  # worst declines first
+    pods_delta.sort(key=lambda x: x.deltaPct)
 
     # ----------------------------------------------------------------
     # 2. sku_sales — SKU-level MRP aggregation
@@ -200,6 +202,44 @@ def aggregate_analysis(
     pincode_yes = sum(1 for r in survey_rows if r.get('pincode_availability'))
     pincode_rate = round(pincode_yes / total_survey, 4) if total_survey else 1.0
 
+    # ----------------------------------------------------------------
+    # 5. Derived survey intelligence signals
+    # ----------------------------------------------------------------
+    # Age group demographic breakdown
+    age_counts: dict[str, int] = defaultdict(int)
+    for r in survey_rows:
+        ag = r.get('age_group') or 'Unknown'
+        age_counts[ag] += 1
+    age_order = ['18-24', '25-34', '35-44', '45+', '45-54', '55+', 'Unknown']
+    age_breakdown = [
+        FreqItem(name=ag, value=age_counts[ag])
+        for ag in age_order if age_counts.get(ag, 0) > 0
+    ]
+    # Also add any ages not in the predefined order
+    for ag, cnt in age_counts.items():
+        if ag not in age_order and cnt > 0:
+            age_breakdown.append(FreqItem(name=ag, value=cnt))
+
+    # High-frequency buyer % (Daily or Few times a week)
+    high_freq_n = sum(
+        1 for r in survey_rows
+        if r.get('consumption_frequency') in ('Daily', 'Few times a week')
+    )
+    high_freq_pct = round(high_freq_n / total_survey, 4) if total_survey else 0.0
+
+    # Unmet demand score: composite of skip rate + platform gap (0.0–1.0)
+    total_skipped = sum(v['skipped'] for v in city_survey.values())
+    avg_skip_rate = total_skipped / total_survey if total_survey else 0.0
+    gap_pct_frac = (blinkit_n + zepto_n) / total_survey if total_survey else 0.0
+    unmet_demand_score = round(avg_skip_rate * 0.5 + gap_pct_frac * 0.5, 4)
+
+    # Estimated missed revenue multiple: ratio of unlisted-platform customers to listed-platform customers
+    # E.g., if 41% shop Blinkit/Zepto and 59% shop BB/Instamart/Amazon, multiple = 41/59 ≈ 0.695
+    # Conservative capture estimate: multiply by 0.4 on the frontend to get the opportunity range
+    listed_frac = other_pct  # fraction shopping on platforms MadMix already sells on
+    missed_multiple = round(gap_pct_frac / listed_frac, 4) if listed_frac > 0 else 0.0
+    missed_multiple = min(missed_multiple, 5.0)  # cap at 5x
+
     return AnalysisResponse(
         totalSalesMrp=total_sales_mrp,
         totalPodsSalesMrp=total_pods_mrp,
@@ -213,4 +253,8 @@ def aggregate_analysis(
         consumptionFrequencyBreakdown=consumption_freq,
         platformGap=platform_gap,
         pincodeAvailabilityRate=pincode_rate,
+        ageGroupBreakdown=age_breakdown,
+        highFrequencyBuyerPct=high_freq_pct,
+        unmetDemandScore=unmet_demand_score,
+        estimatedMissedRevenueMultiple=missed_multiple,
     )

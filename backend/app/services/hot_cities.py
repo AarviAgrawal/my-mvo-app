@@ -16,7 +16,13 @@ def compute_hot_cities(db: Client, limit: int = 6) -> list[HotCityItem]:
     # ----------------------------------------------------------------
     # 1. Pull all pods_sales and compute per-city Apr vs May totals
     # ----------------------------------------------------------------
-    pods_rows = db.table('pods_sales').select('city, month, sales_mrp').execute().data or []
+    pods_rows = (
+        db.table('pods_sales')
+        .select('city, month, sales_mrp')
+        .neq('city', 'Grand Total')
+        .execute()
+        .data or []
+    )
 
     city_months: dict[str, dict[str, float]] = defaultdict(lambda: {'Apr 2026': 0.0, 'May 2026': 0.0})
     for r in pods_rows:

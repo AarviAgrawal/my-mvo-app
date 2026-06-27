@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   AnalysisFilters,
   getUserProfile,
@@ -8,9 +8,13 @@ import {
   shareAnalysis,
   getCompletedDecisionIds,
   toggleCompletedDecision,
+  getHotCities,
+  getDecisions,
+  getAnalysis,
+  getDecisionById,
 } from './lib/data';
 import { supabase } from './lib/supabase';
-import { UserProfile, Decision, SharedAnalysis } from './types';
+import { UserProfile, Decision, SharedAnalysis, AnalysisResponse } from './types';
 import AppShell from './components/layout/AppShell';
 import Dashboard from './pages/Dashboard';
 import Explore from './pages/Explore';
@@ -23,35 +27,45 @@ import DecisionDetail from './pages/DecisionDetail';
 import Auth from './pages/Auth';
 import ShareDialog from './components/ui/ShareDialog';
 
-export default function App() {
-  // 1. Session / Auth State — driven by Supabase onAuthStateChange
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [authChecked, setAuthChecked] = useState<boolean>(false);
+const EMPTY_FILTERS: AnalysisFilters = { state: '', city: '', pincode: '', platform: '', flavour: '' };
 
-  // 2. Profile & Bookmark States
+export default function App() {
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // ── User data ─────────────────────────────────────────────────────────────
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   const [completedDecisions, setCompletedDecisions] = useState<string[]>([]);
 
-  // 3. Navigation Routing State
-  const [activeTab, setActiveTab] = useState<string>('home');
-  const [previousTab, setPreviousTab] = useState<string>('home');
-  const [activeDecisionId, setActiveDecisionId] = useState<string>('');
+  // ── Navigation ────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState('home');
+  const [previousTab, setPreviousTab] = useState('home');
+  const [activeDecisionId, setActiveDecisionId] = useState('');
+  const [exploreFilters, setExploreFilters] = useState<AnalysisFilters>(EMPTY_FILTERS);
 
-  // 4. Shared Filter Scope States
-  const [exploreFilters, setExploreFilters] = useState<AnalysisFilters>({
-    state: '',
-    city: '',
-    pincode: '',
-    platform: '',
-    flavour: '',
-  });
+  // ── Dashboard cache (fetched once after login) ────────────────────────────
+  const [dashboardHotCities, setDashboardHotCities] = useState<any[] | null>(null);
+  const [dashboardDecisions, setDashboardDecisions] = useState<Decision[] | null>(null);
+  const [dashboardAnalytics, setDashboardAnalytics] = useState<AnalysisResponse | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
-  // 5. Global Sharing Overlays State
+  // ── Explore cache (null until first load; only Regenerate clears it) ──────
+  const [exploreDecisions, setExploreDecisions] = useState<Decision[] | null>(null);
+  const [exploreAnalytics, setExploreAnalytics] = useState<AnalysisResponse | null>(null);
+  const [exploreLoading, setExploreLoading] = useState(false);
+  const [loadedFilters, setLoadedFilters] = useState<AnalysisFilters | null>(null);
+
+  // ── Decision detail cache (id → Decision) ─────────────────────────────────
+  const [decisionCache, setDecisionCache] = useState<Record<string, Decision>>({});
+
+  // ── Share dialog ──────────────────────────────────────────────────────────
   const [shareTarget, setShareTarget] = useState<Decision | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
 
-  // Subscribe to Supabase auth state once on mount
+  // ── Supabase session ──────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setIsAuthenticated(!!session);
@@ -65,16 +79,23 @@ export default function App() {
         setBookmarks([]);
         setCompletedDecisions([]);
         setActiveTab('home');
+        // Clear data caches on logout
+        setDashboardHotCities(null);
+        setDashboardDecisions(null);
+        setDashboardAnalytics(null);
+        setExploreDecisions(null);
+        setExploreAnalytics(null);
+        setDecisionCache({});
       }
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load user data after auth confirmed
+  // ── Load user profile + bookmarks after login ─────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
     async function syncUserData() {
+      setProfileLoading(true);
       try {
         const [profile, savedIds, completedIds] = await Promise.all([
           getUserProfile(),
@@ -85,19 +106,91 @@ export default function App() {
         setBookmarks(savedIds);
         setCompletedDecisions(completedIds);
       } catch {
-        // Profile may not exist yet if email not yet confirmed; stay on Auth
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          const email = data.session.user.email ?? '';
+          setUserProfile({
+            name: data.session.user.user_metadata?.full_name || email.split('@')[0],
+            email,
+            avatar: '',
+            watchedCities: [],
+            watchedFlavours: [],
+          });
+        }
+      } finally {
+        setProfileLoading(false);
       }
     }
     syncUserData();
   }, [isAuthenticated]);
 
-  const handleLoginSuccess = () => {
-    // Session change fires onAuthStateChange; useEffect above handles the rest.
-  };
+  // ── Fetch dashboard data once after first login ───────────────────────────
+  useEffect(() => {
+    if (!isAuthenticated || dashboardHotCities !== null) return;
+    fetchDashboardData();
+  }, [isAuthenticated]);
+
+  async function fetchDashboardData() {
+    setDashboardLoading(true);
+    try {
+      const [cities, decs, analytics] = await Promise.all([
+        getHotCities(),
+        getDecisions(),
+        getAnalysis(EMPTY_FILTERS),
+      ]);
+      setDashboardHotCities(cities);
+      setDashboardDecisions(decs);
+      setDashboardAnalytics(analytics);
+      seedDecisionCache(decs);
+    } catch (e) {
+      console.error('Dashboard fetch failed', e);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
+
+  // ── Fetch explore data (on filter change or Regenerate) ───────────────────
+  const fetchExploreData = useCallback(async (filters: AnalysisFilters) => {
+    setExploreLoading(true);
+    try {
+      const [decs, analytics] = await Promise.all([
+        getDecisions(filters),
+        getAnalysis(filters),
+      ]);
+      setExploreDecisions(decs);
+      setExploreAnalytics(analytics);
+      setLoadedFilters(filters);
+      seedDecisionCache(decs);
+    } catch (e) {
+      console.error('Explore fetch failed', e);
+    } finally {
+      setExploreLoading(false);
+    }
+  }, []);
+
+  function seedDecisionCache(decs: Decision[]) {
+    setDecisionCache(prev => {
+      const next = { ...prev };
+      decs.forEach(d => { next[d.id] = d; });
+      return next;
+    });
+  }
+
+  async function ensureDecisionCached(id: string) {
+    if (decisionCache[id]) return;
+    try {
+      const d = await getDecisionById(id);
+      if (d) setDecisionCache(prev => ({ ...prev, [id]: d }));
+    } catch (e) {
+      console.error('Decision fetch failed', e);
+    }
+  }
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleLoginSuccess = () => {};
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    // onAuthStateChange listener resets all state
   };
 
   const handleUpdateProfile = async (updated: UserProfile) => {
@@ -107,37 +200,36 @@ export default function App() {
 
   const handleToggleBookmark = async (id: string) => {
     await toggleBookmarkDecision(id);
-    const freshIds = await getBookmarkedDecisionIds();
-    setBookmarks(freshIds);
+    setBookmarks(await getBookmarkedDecisionIds());
   };
 
   const handleToggleCompleted = async (id: string) => {
     await toggleCompletedDecision(id);
-    const freshIds = await getCompletedDecisionIds();
-    setCompletedDecisions(freshIds);
+    setCompletedDecisions(await getCompletedDecisionIds());
   };
 
   const handleNavigateToExplore = (filters: Partial<AnalysisFilters>) => {
-    setExploreFilters({
+    const next: AnalysisFilters = {
       state: filters.state || '',
       city: filters.city || '',
       pincode: filters.pincode || '',
       platform: filters.platform || '',
       flavour: filters.flavour || '',
-    });
+    };
+    setExploreFilters(next);
     setPreviousTab(activeTab);
     setActiveTab('explore');
   };
 
   const handleLoadSharedScope = (filterScope: SharedAnalysis['filterScope'], decisionId?: string) => {
-    setExploreFilters({
+    const next: AnalysisFilters = {
       state: filterScope.state || '',
       city: filterScope.city || '',
       pincode: filterScope.pincode || '',
       platform: filterScope.platform || '',
       flavour: filterScope.flavour || '',
-    });
-
+    };
+    setExploreFilters(next);
     if (decisionId) {
       setActiveDecisionId(decisionId);
       setPreviousTab('shared');
@@ -152,6 +244,7 @@ export default function App() {
     setActiveDecisionId(id);
     setPreviousTab(activeTab);
     setActiveTab('decision-detail');
+    ensureDecisionCached(id);
   };
 
   const handleTriggerShare = (decision: Decision) => {
@@ -161,33 +254,19 @@ export default function App() {
 
   const handleConfirmShare = async (title: string, note: string) => {
     if (!shareTarget) return;
-
     await shareAnalysis(
-      title,
-      note,
-      {
-        state: shareTarget.state || '',
-        city: shareTarget.city || '',
-        pincode: '',
-        platform: shareTarget.platform || '',
-        flavour: shareTarget.flavour || '',
-      },
-      'decision',
-      null,
-      shareTarget.id,
+      title, note,
+      { state: shareTarget.state || '', city: shareTarget.city || '', pincode: '', platform: shareTarget.platform || '', flavour: shareTarget.flavour || '' },
+      'decision', null, shareTarget.id,
     );
-
     setIsShareOpen(false);
     setShareTarget(null);
     setActiveTab('shared');
   };
 
-  // Show nothing until Supabase has resolved the initial session check
-  if (!authChecked) return null;
-
-  if (!isAuthenticated || !userProfile) {
-    return <Auth onLoginSuccess={handleLoginSuccess} />;
-  }
+  // ── Guards ────────────────────────────────────────────────────────────────
+  if (!authChecked || profileLoading) return null;
+  if (!isAuthenticated || !userProfile) return <Auth onLoginSuccess={handleLoginSuccess} />;
 
   return (
     <div className="w-full">
@@ -204,6 +283,10 @@ export default function App() {
       >
         {activeTab === 'home' && (
           <Dashboard
+            hotCities={dashboardHotCities ?? []}
+            decisions={dashboardDecisions ?? []}
+            analytics={dashboardAnalytics}
+            isLoading={dashboardLoading}
             onNavigateToExplore={handleNavigateToExplore}
             onShare={handleTriggerShare}
             bookmarks={bookmarks}
@@ -218,6 +301,11 @@ export default function App() {
         {activeTab === 'explore' && (
           <Explore
             initialFilters={exploreFilters}
+            cachedDecisions={exploreDecisions}
+            cachedAnalytics={exploreAnalytics}
+            loadedFilters={loadedFilters}
+            isLoading={exploreLoading}
+            onFetchData={fetchExploreData}
             onShare={handleTriggerShare}
             bookmarks={bookmarks}
             onToggleBookmark={handleToggleBookmark}
@@ -266,6 +354,7 @@ export default function App() {
         {activeTab === 'decision-detail' && (
           <DecisionDetail
             decisionId={activeDecisionId}
+            cachedDecision={decisionCache[activeDecisionId] ?? null}
             onBack={() => setActiveTab(previousTab)}
             isBookmarked={bookmarks.includes(activeDecisionId)}
             onToggleBookmark={handleToggleBookmark}
@@ -280,10 +369,7 @@ export default function App() {
       {shareTarget && (
         <ShareDialog
           isOpen={isShareOpen}
-          onClose={() => {
-            setIsShareOpen(false);
-            setShareTarget(null);
-          }}
+          onClose={() => { setIsShareOpen(false); setShareTarget(null); }}
           onConfirm={handleConfirmShare}
           itemName={shareTarget.action}
         />

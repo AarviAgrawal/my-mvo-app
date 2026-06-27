@@ -27,18 +27,8 @@ class DecisionResponse(BaseModel):
     platform: Optional[str] = None
     reasoning: str
     evidence: list[EvidenceItem] = Field(default_factory=list)
-    rawDataRefs: list[RawDataRef] = Field(default_factory=list, alias='raw_data_refs')
-    createdAt: str = Field(alias='created_at')
+    # validation_alias: accepted from Supabase snake_case; output uses field name (camelCase)
+    rawDataRefs: list[RawDataRef] = Field(default_factory=list, validation_alias='raw_data_refs')
+    createdAt: str = Field(validation_alias='created_at')
 
     model_config = {'populate_by_name': True}
-
-    @model_validator(mode='before')
-    @classmethod
-    def parse_jsonb(cls, values: Any) -> Any:
-        """Supabase returns JSONB columns as Python lists/dicts already parsed."""
-        if isinstance(values, dict):
-            if isinstance(values.get('evidence'), list):
-                pass  # already parsed
-            if isinstance(values.get('raw_data_refs'), list):
-                pass
-        return values

@@ -128,4 +128,9 @@ export interface AnalysisResponse {
   consumptionFrequencyBreakdown: { name: string; value: number }[];
   platformGap: PlatformGapSummary;
   pincodeAvailabilityRate: number;
+  // Derived survey intelligence
+  ageGroupBreakdown: { name: string; value: number }[];
+  highFrequencyBuyerPct: number;          // 0.0–1.0: Daily + Few times a week buyers
+  unmetDemandScore: number;               // 0.0–1.0: composite skip rate + platform gap
+  estimatedMissedRevenueMultiple: number; // gap_pct / listed_pct; multiply by revenue × 0.4 for conservative estimate
 }

@@ -71,12 +71,18 @@ export default function Profile({ userProfile, onUpdateProfile, onLogout }: Prof
           
           {/* Avatar Section */}
           <div className="flex items-center gap-5 pb-5 border-b border-brand-lavender-tint/40">
-            <img 
-              src={avatar} 
-              alt={name} 
-              referrerPolicy="no-referrer"
-              className="w-16 h-16 rounded-2xl border-2 border-brand-lavender object-cover bg-brand-lavender-tint shadow-xs"
-            />
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={name}
+                referrerPolicy="no-referrer"
+                className="w-16 h-16 rounded-2xl border-2 border-brand-lavender object-cover bg-brand-lavender-tint shadow-xs"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl border-2 border-brand-lavender bg-brand-lavender/30 flex items-center justify-center shrink-0 shadow-xs">
+                <span className="font-fredoka font-bold text-2xl text-brand-purple uppercase">{name?.[0] ?? '?'}</span>
+              </div>
+            )}
             <div className="space-y-1.5 flex-1">
               <label className="text-[10px] font-mono font-bold text-brand-near-black/50 uppercase tracking-widest block">Avatar URL</label>
               <input 

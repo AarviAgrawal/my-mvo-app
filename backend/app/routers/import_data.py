@@ -24,6 +24,16 @@ UPSERT_CONFLICTS: dict[str, str | None] = {
     'decisions': 'scope_hash',
 }
 
+# Supabase PostgREST requires at least one filter for DELETE.
+# We use neq(col, sentinel) which matches every row because the sentinel never exists.
+DELETE_COL: dict[str, str] = {
+    'sku_sales': 'city',
+    'pods_sales': 'city',
+    'sales_spends': 'platform',
+    'survey_responses': 'id',
+    'decisions': 'id',
+}
+
 BATCH_SIZE = 200
 
 
@@ -85,8 +95,9 @@ def clear_data(
     """
     db = get_service_client()
     table = TABLE_MAP[data_type]
+    col = DELETE_COL[data_type]
     try:
-        db.table(table).delete().neq('id', '').execute()
+        db.table(table).delete().neq(col, '__sentinel_never_exists__').execute()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {'cleared': data_type, 'table': table}

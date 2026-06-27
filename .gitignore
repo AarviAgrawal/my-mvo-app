@@ -1,0 +1,10 @@
+# Sensitive data files — never commit raw Excel/CSV data
+assets/*.xlsx
+assets/*.csv
+
+# Local debug output from dump_api_data.py
+debug_dumps/
+
+# OS
+.DS_Store
+Thumbs.db

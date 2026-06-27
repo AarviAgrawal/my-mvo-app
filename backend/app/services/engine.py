@@ -47,6 +47,8 @@ REQUIRED JSON OUTPUT FORMAT:
 
 def _call_claude(input_context: str, fallback_action: str, fallback_reasoning: str) -> tuple[str, str]:
     """Call Claude API and return (action, reasoning). Falls back to deterministic strings on failure."""
+    if not settings.anthropic_api_key:
+        return fallback_action, fallback_reasoning
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         response = client.messages.create(
@@ -65,8 +67,8 @@ def _call_claude(input_context: str, fallback_action: str, fallback_reasoning: s
 # Scope hash
 # ---------------------------------------------------------------------------
 
-def _scope_hash(city: str, platform: str, flavour: str) -> str:
-    scope = f'{city}_{platform}_{flavour}'.lower().strip()
+def _scope_hash(city: str, platform: str, flavour: str, variant: str = '') -> str:
+    scope = f'{city}_{platform}_{flavour}_{variant}'.lower().strip('_')
     return hashlib.sha256(scope.encode()).hexdigest()
 
 
@@ -216,7 +218,7 @@ def _check_platform_expansion(
         'platform': top_ext,
         'flavour': None,
         'reasoning': reasoning,
-        'scope_hash': scope_hash + '_expand',
+        'scope_hash': _scope_hash(city, '', '', 'expand'),
         'created_at': datetime.now(timezone.utc).isoformat(),
         'evidence': [
             {'label': f'{top_ext} Demand', 'detail': f'{ext_pct*100:.0f}% of city respondents shop on Blinkit/Zepto', 'source': 'Customer Survey', 'trend': 'up'},
@@ -298,7 +300,7 @@ def _check_spend_leak(spends_rows: list[dict], platform: str, scope_hash: str) -
         'platform': platform,
         'flavour': None,
         'reasoning': reasoning,
-        'scope_hash': scope_hash + f'_spend_{platform}',
+        'scope_hash': _scope_hash('', platform, '', 'spend'),
         'created_at': datetime.now(timezone.utc).isoformat(),
         'evidence': [
             {'label': 'Peak A2S Ratio', 'detail': f'{peak_a2s*100:.1f}% (target <{settings.a2s_threshold*100:.0f}%)', 'source': 'Sales vs Spends', 'trend': 'down'},
@@ -365,7 +367,7 @@ def _check_weak_demand(
         'platform': platform or None,
         'flavour': None,
         'reasoning': reasoning,
-        'scope_hash': scope_hash + '_weak',
+        'scope_hash': _scope_hash(scope_hash, '', '', 'weak'),
         'created_at': datetime.now(timezone.utc).isoformat(),
         'evidence': [
             {'label': 'May PODs Sales', 'detail': f'₹{may_sales:,.0f} (below ₹{settings.low_sales_mrp_threshold:,.0f} threshold)', 'source': 'PODs Sales', 'trend': 'down'},
@@ -400,12 +402,9 @@ def generate_decisions(
         cities_to_check = list({r['city'] for r in top_rows})[:20]
 
     # Spend leak check uses a platform-level scope hash (not city-scoped)
-    spend_scope = _scope_hash('', platform, '')
-    cached_spend = _check_cache(db, spend_scope + '_spend_Big Basket')
-    cached_spend_im = _check_cache(db, spend_scope + '_spend_Instamart')
 
     # Fetch raw data for all rules at once (avoid N+1 queries)
-    pods_q = db.table('pods_sales').select('city, platform, month, sales_mrp')
+    pods_q = db.table('pods_sales').select('city, platform, month, sales_mrp').neq('city', 'Grand Total')
     if platform:
         pods_q = pods_q.eq('platform', platform)
     if cities_to_check:
@@ -425,12 +424,12 @@ def generate_decisions(
 
     # --- Spend leak rules (platform-level) ---
     for plat in (['Big Basket', 'Instamart'] if not platform else [platform]):
-        cache_key = spend_scope + f'_spend_{plat}'
+        cache_key = _scope_hash('', plat, '', 'spend')
         cached = _check_cache(db, cache_key)
         if cached:
             decisions_raw.extend(cached)
         else:
-            result = _check_spend_leak(spends_rows, plat, spend_scope)
+            result = _check_spend_leak(spends_rows, plat, cache_key)
             if result:
                 _upsert_decision(db, result)
                 decisions_raw.append(result)
