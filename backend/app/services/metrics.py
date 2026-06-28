@@ -136,7 +136,7 @@ def aggregate_analysis(
     # 4. survey_responses — availability & platform gap signals
     # ----------------------------------------------------------------
     survey_q = db.table('survey_responses').select(
-        'location, consumption_frequency, skipped_due_to_unavailability, platform, pincode_availability'
+        'age_group, location, consumption_frequency, skipped_due_to_unavailability, platform, pincode_availability'
     )
     if city_filter:
         survey_q = survey_q.in_('location', city_filter)
@@ -206,18 +206,22 @@ def aggregate_analysis(
     # 5. Derived survey intelligence signals
     # ----------------------------------------------------------------
     # Age group demographic breakdown
+    # Skip null/'Unknown' rows — they add no insight and the column may not be populated.
     age_counts: dict[str, int] = defaultdict(int)
     for r in survey_rows:
-        ag = r.get('age_group') or 'Unknown'
-        age_counts[ag] += 1
-    age_order = ['18-24', '25-34', '35-44', '45+', '45-54', '55+', 'Unknown']
-    age_breakdown = [
-        FreqItem(name=ag, value=age_counts[ag])
-        for ag in age_order if age_counts.get(ag, 0) > 0
-    ]
-    # Also add any ages not in the predefined order
-    for ag, cnt in age_counts.items():
-        if ag not in age_order and cnt > 0:
+        ag = r.get('age_group')
+        if ag and str(ag).strip() and str(ag).strip().lower() not in ('unknown', 'nan', 'none', ''):
+            age_counts[str(ag).strip()] += 1
+    age_order = ['Under 18', '18-24', '18-25', '25-34', '26-35', '35-44', '36-45', '45-54', '45+', '46+', '55+']
+    seen = set()
+    age_breakdown = []
+    for ag in age_order:
+        if age_counts.get(ag, 0) > 0 and ag not in seen:
+            age_breakdown.append(FreqItem(name=ag, value=age_counts[ag]))
+            seen.add(ag)
+    # Append any remaining age values not in the predefined order
+    for ag, cnt in sorted(age_counts.items()):
+        if ag not in seen and cnt > 0:
             age_breakdown.append(FreqItem(name=ag, value=cnt))
 
     # High-frequency buyer % (Daily or Few times a week)

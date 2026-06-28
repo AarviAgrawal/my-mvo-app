@@ -373,10 +373,17 @@ def parse_survey() -> list[dict]:
         skipped_flag = str(r.get('Skipped Due to Unavailability', 'No')).strip().lower() == 'yes'
         pincode_avail = str(r.get('Pincode Availability', 'Yes')).strip().lower() == 'yes'
 
+        # Try multiple possible column names for age group
+        age_raw = (
+            r.get('Age Group') or r.get('Age group') or r.get('age group') or
+            r.get('Age Range') or r.get('Age') or r.get('age') or ''
+        )
+        age_val = str(age_raw).strip() if age_raw and str(age_raw).strip().lower() not in ('nan', 'none', '') else None
+
         rows.append({
             'id': str(r['MadMix Code']).strip(),
             'submitted_at': datetime.now(timezone.utc).isoformat(),
-            'age_group': str(r.get('Age Group', '')).strip() or None,
+            'age_group': age_val,
             'location': location,
             'consumption_frequency': freq if freq in VALID_FREQUENCIES else None,
             'skipped_due_to_unavailability': skipped_flag,
